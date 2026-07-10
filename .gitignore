@@ -1,0 +1,8 @@
+.env
+token.json
+.gmail_daemon_state.json
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store
