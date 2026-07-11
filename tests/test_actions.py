@@ -6,11 +6,16 @@ from gmail_daemon.gmail import EmailMessage
 
 
 class ActionTests(unittest.TestCase):
-    def message(self, subject: str, body: str) -> EmailMessage:
+    def message(
+        self,
+        subject: str,
+        body: str,
+        sender: str = "sender@example.com",
+    ) -> EmailMessage:
         return EmailMessage(
             id="msg-1",
             thread_id="thread-1",
-            sender="sender@example.com",
+            sender=sender,
             subject=subject,
             date="Fri, 10 Jul 2026 12:00:00 -0700",
             snippet=body[:80],
@@ -57,6 +62,43 @@ class ActionTests(unittest.TestCase):
         )
 
         self.assertIsNone(candidate)
+
+    def test_skips_generic_marketing_cta(self) -> None:
+        candidate = build_task_candidate(
+            self.message(
+                "Last chance to improve your workflow",
+                "Hi there, please register now for our webinar. Learn more and unsubscribe here.",
+                sender="marketing@saas-company.example",
+            ),
+            self.classification(["needs reply", "sales"]),
+        )
+
+        self.assertIsNone(candidate)
+
+    def test_skips_newsletter_with_question_style_subject(self) -> None:
+        candidate = build_task_candidate(
+            self.message(
+                "Ready to grow faster?",
+                "Book a demo today and see how our platform can help. Unsubscribe anytime.",
+                sender="updates@hubspot.example",
+            ),
+            self.classification(["needs reply", "newsletter"]),
+        )
+
+        self.assertIsNone(candidate)
+
+    def test_allows_luma_cancellation_action(self) -> None:
+        candidate = build_task_candidate(
+            self.message(
+                "Event cancelled: Founder Dinner",
+                "The host cancelled this Luma event. Your RSVP is no longer active.",
+                sender="notifications@lu.ma",
+            ),
+            self.classification(["meeting", "newsletter"]),
+        )
+
+        self.assertIsNotNone(candidate)
+        self.assertEqual("Meeting changed or cancelled", candidate.reason)
 
 
 if __name__ == "__main__":

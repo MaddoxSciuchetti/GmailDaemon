@@ -22,6 +22,37 @@ _MEETING_CHANGE_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+_MARKETING_CTA_RE = re.compile(
+    r"\b("
+    r"book a demo|schedule a demo|join us|register now|sign up|"
+    r"learn more|read more|get started|start your free trial|"
+    r"download (the )?(guide|whitepaper|ebook)|limited time|"
+    r"don't miss|exclusive offer|save [0-9]+%|unsubscribe|"
+    r"view (this )?email in (your )?browser"
+    r")\b",
+    re.IGNORECASE,
+)
+_MARKETING_SENDER_RE = re.compile(
+    r"\b("
+    r"marketing|newsletter|noreply|no-reply|updates|campaign|"
+    r"mailchimp|hubspot|sendgrid|klaviyo|constantcontact"
+    r")\b",
+    re.IGNORECASE,
+)
+_GENERIC_GREETING_RE = re.compile(r"\b(hi there|hello there|dear customer|dear friend)\b", re.IGNORECASE)
+_OPERATIONAL_PLATFORM_RE = re.compile(
+    r"\b("
+    r"luma|lu\.ma|calendly|google calendar|eventbrite|zoom|meetup"
+    r")\b",
+    re.IGNORECASE,
+)
+_OPERATIONAL_EVENT_RE = re.compile(
+    r"\b("
+    r"rsvp|event|ticket|reservation|booking|meeting|webinar|"
+    r"cancelled|canceled|rescheduled|updated|venue|host"
+    r")\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -37,8 +68,15 @@ def build_task_candidate(
 ) -> TaskCandidate | None:
     text = _message_text(message)
     labels = set(classification.labels)
+    operational_platform_action = _is_operational_platform_action(message, text)
 
-    if "spam" in labels or "newsletter" in labels:
+    if "spam" in labels:
+        return None
+
+    if ("newsletter" in labels or "sales" in labels) and not operational_platform_action:
+        return None
+
+    if _is_marketing_noise(message, text, labels) and not operational_platform_action:
         return None
 
     reason = _action_reason(text, labels)
@@ -54,6 +92,34 @@ def build_task_candidate(
 
 def _message_text(message: EmailMessage) -> str:
     return "\n".join((message.subject, message.snippet, message.body)).strip()
+
+
+def _is_operational_platform_action(message: EmailMessage, text: str) -> bool:
+    platform_context = f"{message.sender}\n{text}"
+    return bool(_OPERATIONAL_PLATFORM_RE.search(platform_context) and _OPERATIONAL_EVENT_RE.search(text))
+
+
+def _is_marketing_noise(message: EmailMessage, text: str, labels: set[str]) -> bool:
+    sender = message.sender.lower()
+    lowered = text.lower()
+    score = 0
+
+    if "sales" in labels or "newsletter" in labels:
+        score += 2
+
+    if _MARKETING_CTA_RE.search(lowered):
+        score += 2
+
+    if _MARKETING_SENDER_RE.search(sender):
+        score += 1
+
+    if _GENERIC_GREETING_RE.search(lowered):
+        score += 1
+
+    if "unsubscribe" in lowered:
+        score += 2
+
+    return score >= 2
 
 
 def _action_reason(text: str, labels: set[str]) -> str | None:
