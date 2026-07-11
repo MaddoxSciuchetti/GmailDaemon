@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import signal
-import time
+import threading
 from datetime import datetime
 
 from googleapiclient.discovery import build
@@ -14,12 +14,12 @@ from .recommendations import recommend_next_steps
 from .state import DaemonState
 
 
-_running = True
+_stop_event = threading.Event()
 
 
 def _stop(_signum: int, _frame: object) -> None:
-    global _running
-    _running = False
+    print("\nStopping Gmail recommendation daemon...")
+    _stop_event.set()
 
 
 def main() -> None:
@@ -44,15 +44,14 @@ def main() -> None:
     else:
         print("Email classifier: disabled")
 
-    while _running:
+    while not _stop_event.is_set():
         try:
             _poll_once(service, state, config.gmail_query, classifier)
             state.save(config.state_file)
         except Exception as exc:
             print(f"[{datetime.now().isoformat(timespec='seconds')}] Poll failed: {exc}")
 
-        if _running:
-            time.sleep(config.poll_interval_seconds)
+        _stop_event.wait(config.poll_interval_seconds)
 
     state.save(config.state_file)
     print("Gmail recommendation daemon stopped.")
