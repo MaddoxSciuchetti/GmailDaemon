@@ -28,6 +28,8 @@ class Config:
     classifier_enabled: bool
     classifier_model_path: str
     classifier_threshold: float
+    google_tasks_enabled: bool
+    google_tasks_list_id: str
 
 
 def _uri(value: str, default_scheme: str = "https://") -> str:
@@ -89,4 +91,6 @@ def load_config() -> Config:
             _default_classifier_model_path(),
         ).strip(),
         classifier_threshold=classifier_threshold,
+        google_tasks_enabled=_bool_env("GOOGLE_TASKS_ENABLED", True),
+        google_tasks_list_id=os.getenv("GOOGLE_TASKS_LIST_ID", "@default").strip(),
     )

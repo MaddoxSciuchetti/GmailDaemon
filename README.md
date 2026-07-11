@@ -10,6 +10,7 @@ Small read-only daemon that watches a Gmail inbox and prints recommended next st
 - Tracks processed Gmail message IDs in `.gmail_daemon_state.json`.
 - Polls Gmail on an interval and prints simple next-step recommendations.
 - Classifies emails locally with an open-source Hugging Face model when configured.
+- Creates Google Tasks for emails that clearly require action.
 - Does not request or use any send-email permission.
 
 ## Setup
@@ -44,6 +45,8 @@ TOKEN_FILE=token.json
 EMAIL_CLASSIFIER_ENABLED=true
 EMAIL_CLASSIFIER_MODEL_PATH=/Users/maddoxsciuchetti/.cache/huggingface/hub/models--FacebookAI--roberta-large-mnli/snapshots/2a8f12d27941090092df78e4ba6f0928eb5eac98
 EMAIL_CLASSIFIER_THRESHOLD=0.90
+GOOGLE_TASKS_ENABLED=true
+GOOGLE_TASKS_LIST_ID=@default
 ```
 
 ## Notes
@@ -57,3 +60,18 @@ The default classifier uses a locally cached Hugging Face zero-shot model. On th
 ```
 
 The daemon sets `local_files_only=True`, so email text is not sent to Hugging Face. If the model or ML dependencies are unavailable, the daemon falls back to the rule-based recommendations.
+
+## Re-run Google OAuth
+
+Creating Google Tasks requires an additional OAuth scope. After enabling the Google Tasks API, run:
+
+```bash
+python -m gmail_daemon.reauth
+```
+
+This refreshes `token.json` with:
+
+```text
+https://www.googleapis.com/auth/gmail.readonly
+https://www.googleapis.com/auth/tasks
+```
