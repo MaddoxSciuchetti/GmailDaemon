@@ -63,7 +63,7 @@ The daemon sets `local_files_only=True`, so email text is not sent to Hugging Fa
 
 ## Re-run Google OAuth
 
-Creating Google Tasks requires an additional OAuth scope. After enabling the Google Tasks API, run:
+Creating Google Tasks, sending accepted replies, and creating Calendar events require additional OAuth scopes. After enabling the Google Tasks and Google Calendar APIs, run:
 
 ```bash
 python -m gmail_daemon.reauth
@@ -73,5 +73,27 @@ This refreshes `token.json` with:
 
 ```text
 https://www.googleapis.com/auth/gmail.readonly
+https://www.googleapis.com/auth/gmail.send
 https://www.googleapis.com/auth/tasks
+https://www.googleapis.com/auth/calendar.events
 ```
+
+## Review UI
+
+The daemon writes actionable email proposals to `email_proposals.json`. Start the local review UI with:
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
+
+Accepting a proposal sends the proposed reply through Gmail. Declining a proposal stores your replacement text without sending it.
+
+If a later message in the same Gmail thread clearly agrees with your sent proposal and includes a parseable time such as `2026-07-12 15:00` or `tomorrow at 3pm`, the daemon creates a Google Calendar event. If no clear time is present, it does not create a calendar event.

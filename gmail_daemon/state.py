@@ -9,6 +9,7 @@ from pathlib import Path
 class DaemonState:
     seen_message_ids: set[str] = field(default_factory=set)
     created_task_message_ids: set[str] = field(default_factory=set)
+    created_calendar_thread_ids: set[str] = field(default_factory=set)
 
     @classmethod
     def load(cls, path: Path) -> "DaemonState":
@@ -19,6 +20,7 @@ class DaemonState:
         return cls(
             seen_message_ids=set(data.get("seen_message_ids", [])),
             created_task_message_ids=set(data.get("created_task_message_ids", [])),
+            created_calendar_thread_ids=set(data.get("created_calendar_thread_ids", [])),
         )
 
     def save(self, path: Path) -> None:
@@ -27,6 +29,7 @@ class DaemonState:
                 {
                     "seen_message_ids": sorted(self.seen_message_ids),
                     "created_task_message_ids": sorted(self.created_task_message_ids),
+                    "created_calendar_thread_ids": sorted(self.created_calendar_thread_ids),
                 },
                 indent=2,
             ),

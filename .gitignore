@@ -1,8 +1,11 @@
 .env
 token.json
 .gmail_daemon_state.json
+email_proposals.json
 __pycache__/
 *.py[cod]
 .venv/
 venv/
 .DS_Store
+web/node_modules/
+web/.next/

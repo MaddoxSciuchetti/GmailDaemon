@@ -8,9 +8,11 @@ from googleapiclient.discovery import build
 
 from .auth import get_credentials
 from .actions import build_task_candidate
+from .calendar_events import build_calendar_candidate, create_calendar_event
 from .classifier import EmailClassification, build_classifier
 from .config import load_config
 from .gmail import get_message, list_message_ids
+from .proposals import ProposalStore
 from .recommendations import recommend_next_steps
 from .state import DaemonState
 from .tasks import create_task, resolve_tasklist_id
@@ -32,8 +34,10 @@ def main() -> None:
     credentials = get_credentials(config)
     gmail_service = build("gmail", "v1", credentials=credentials)
     tasks_service = build("tasks", "v1", credentials=credentials) if config.google_tasks_enabled else None
+    calendar_service = build("calendar", "v3", credentials=credentials)
     tasklist_id = resolve_tasklist_id(tasks_service, config.google_tasks_list_id) if tasks_service else ""
     state = DaemonState.load(config.state_file)
+    proposal_store = ProposalStore()
     classifier = build_classifier(
         enabled=config.classifier_enabled,
         model_path=config.classifier_model_path,
@@ -62,6 +66,8 @@ def main() -> None:
                 classifier,
                 config.google_tasks_enabled,
                 tasklist_id,
+                proposal_store,
+                calendar_service,
             )
             state.save(config.state_file)
         except Exception as exc:
@@ -81,6 +87,8 @@ def _poll_once(
     classifier: object,
     tasks_enabled: bool,
     tasklist_id: str,
+    proposal_store: ProposalStore,
+    calendar_service: object,
 ) -> None:
     message_ids = list_message_ids(gmail_service, query)
     new_ids = [message_id for message_id in reversed(message_ids) if message_id not in state.seen_message_ids]
@@ -97,7 +105,16 @@ def _poll_once(
         except Exception as exc:
             print(f"Classification failed; using rule-based recommendations: {exc}")
             classification = EmailClassification(labels=[], scores={}, model_name="none")
-        _maybe_create_task(tasks_service, state, tasklist_id, message, classification, tasks_enabled)
+        _maybe_create_calendar_event(calendar_service, state, proposal_store, message)
+        _maybe_create_task(
+            tasks_service,
+            state,
+            tasklist_id,
+            message,
+            classification,
+            tasks_enabled,
+            proposal_store,
+        )
         _print_recommendation(message, classification)
 
 
@@ -108,6 +125,7 @@ def _maybe_create_task(
     message: object,
     classification: EmailClassification,
     tasks_enabled: bool,
+    proposal_store: ProposalStore,
 ) -> None:
     if not tasks_enabled or tasks_service is None or message.id in state.created_task_message_ids:
         return
@@ -115,6 +133,9 @@ def _maybe_create_task(
     candidate = build_task_candidate(message, classification)
     if candidate is None:
         return
+
+    proposal = proposal_store.upsert_from_email(message, classification, candidate)
+    print(f"Created email proposal: {proposal.task_title}")
 
     try:
         task = create_task(tasks_service, tasklist_id, candidate)
@@ -126,6 +147,39 @@ def _maybe_create_task(
     print(f"Created Google Task: {task.title}")
     if task.web_view_link:
         print(f"Task link: {task.web_view_link}")
+
+
+def _maybe_create_calendar_event(
+    calendar_service: object,
+    state: DaemonState,
+    proposal_store: ProposalStore,
+    message: object,
+) -> None:
+    if message.thread_id in state.created_calendar_thread_ids:
+        return
+
+    sent_proposals = [
+        proposal
+        for proposal in proposal_store.list()
+        if proposal.thread_id == message.thread_id and proposal.status == "sent"
+    ]
+    if not sent_proposals:
+        return
+
+    candidate = build_calendar_candidate(sent_proposals[0], message)
+    if candidate is None:
+        return
+
+    try:
+        event_id = create_calendar_event(calendar_service, candidate)
+    except Exception as exc:
+        print(f"Calendar event creation failed: {exc}")
+        return
+
+    sent_proposals[0].calendar_event_id = event_id
+    proposal_store.update(sent_proposals[0])
+    state.created_calendar_thread_ids.add(message.thread_id)
+    print(f"Created calendar event: {candidate.summary}")
 
 
 def _print_recommendation(message: object, classification: EmailClassification) -> None:
