@@ -12,6 +12,7 @@ from typing import Iterable, Iterator
 from .actions import TaskCandidate
 from .classifier import EmailClassification
 from .gmail import EmailMessage
+from .response_generator import template_reply
 
 
 DB_FILE = Path("gmail_daemon.db")
@@ -89,6 +90,7 @@ class ProposalStore:
         message: EmailMessage,
         classification: EmailClassification,
         candidate: TaskCandidate,
+        proposed_reply: str | None = None,
     ) -> EmailProposal:
         existing = self.get_by_message_id(message.id)
         if existing:
@@ -105,7 +107,7 @@ class ProposalStore:
             subject=message.subject,
             reason=candidate.reason,
             task_title=candidate.title,
-            proposed_reply=_default_reply(candidate),
+            proposed_reply=proposed_reply or template_reply(candidate),
             labels=classification.labels,
             original_text=_original_text(message),
         )
@@ -344,18 +346,3 @@ def _original_text(message: EmailMessage) -> str:
     text = message.body.strip() or message.snippet.strip()
     return text[:8000]
 
-
-def _default_reply(candidate: TaskCandidate) -> str:
-    if candidate.reason == "Reschedule required":
-        return "Thanks for letting me know. Please send over a few times that work for you, and I will confirm one."
-
-    if candidate.reason == "Meeting changed or cancelled":
-        return "Thanks for the update. I saw the change and will adjust accordingly."
-
-    if candidate.reason == "Payment or invoice follow-up":
-        return "Thanks for sending this over. I will review the details and follow up if anything is missing."
-
-    if candidate.reason == "Support issue needs review":
-        return "Thanks for flagging this. I will take a look and get back to you."
-
-    return "Thanks for reaching out. I will review this and follow up shortly."

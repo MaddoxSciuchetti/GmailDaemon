@@ -30,6 +30,9 @@ class Config:
     classifier_threshold: float
     google_tasks_enabled: bool
     google_tasks_list_id: str
+    response_generator_enabled: bool
+    response_generator_model: str
+    response_generator_base_url: str
 
 
 def _uri(value: str, default_scheme: str = "https://") -> str:
@@ -93,4 +96,13 @@ def load_config() -> Config:
         classifier_threshold=classifier_threshold,
         google_tasks_enabled=_bool_env("GOOGLE_TASKS_ENABLED", True),
         google_tasks_list_id=os.getenv("GOOGLE_TASKS_LIST_ID", "@default").strip(),
+        response_generator_enabled=_bool_env("RESPONSE_GENERATOR_ENABLED", True),
+        response_generator_model=os.getenv(
+            "RESPONSE_GENERATOR_MODEL",
+            "gpt-oss:20b,gemma4:12b-mlx",
+        ).strip(),
+        response_generator_base_url=os.getenv(
+            "RESPONSE_GENERATOR_BASE_URL",
+            "http://127.0.0.1:11434",
+        ).strip(),
     )

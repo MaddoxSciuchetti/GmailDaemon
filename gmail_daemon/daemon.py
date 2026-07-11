@@ -14,6 +14,7 @@ from .config import load_config
 from .gmail import get_message, list_message_ids
 from .proposals import ProposalStore
 from .recommendations import recommend_next_steps
+from .response_generator import ResponseGenerator
 from .state import DaemonState
 from .tasks import create_task, resolve_tasklist_id
 
@@ -43,6 +44,11 @@ def main() -> None:
         model_path=config.classifier_model_path,
         threshold=config.classifier_threshold,
     )
+    response_generator = ResponseGenerator(
+        enabled=config.response_generator_enabled,
+        model=config.response_generator_model,
+        base_url=config.response_generator_base_url,
+    )
 
     print("Gmail recommendation daemon started.")
     print(f"Query: {config.gmail_query}")
@@ -68,6 +74,7 @@ def main() -> None:
                 tasklist_id,
                 proposal_store,
                 calendar_service,
+                response_generator,
             )
             state.save(config.state_file)
         except Exception as exc:
@@ -89,6 +96,7 @@ def _poll_once(
     tasklist_id: str,
     proposal_store: ProposalStore,
     calendar_service: object,
+    response_generator: ResponseGenerator,
 ) -> None:
     message_ids = list_message_ids(gmail_service, query)
     new_ids = [message_id for message_id in reversed(message_ids) if message_id not in state.seen_message_ids]
@@ -114,6 +122,7 @@ def _poll_once(
             classification,
             tasks_enabled,
             proposal_store,
+            response_generator,
         )
         _print_recommendation(message, classification)
 
@@ -126,12 +135,14 @@ def _maybe_create_task(
     classification: EmailClassification,
     tasks_enabled: bool,
     proposal_store: ProposalStore,
+    response_generator: ResponseGenerator,
 ) -> None:
     candidate = build_task_candidate(message, classification)
     if candidate is None:
         return
 
-    proposal = proposal_store.upsert_from_email(message, classification, candidate)
+    proposed_reply = response_generator.generate(message, classification, candidate)
+    proposal = proposal_store.upsert_from_email(message, classification, candidate, proposed_reply)
     print(f"Created email proposal: {proposal.task_title}")
 
     if not tasks_enabled or tasks_service is None or message.id in state.created_task_message_ids:

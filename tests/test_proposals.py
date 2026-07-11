@@ -53,6 +53,16 @@ class ProposalStoreTests(unittest.TestCase):
         self.assertEqual(1, len(self.store.list()))
         self.assertEqual("Can you review this today?", second.original_text)
 
+    def test_uses_generated_reply_when_provided(self) -> None:
+        proposal = self.store.upsert_from_email(
+            self.message(),
+            self.classification(),
+            self.candidate(),
+            "Generated reply.",
+        )
+
+        self.assertEqual("Generated reply.", proposal.proposed_reply)
+
     def test_update_persists_status(self) -> None:
         proposal = self.store.upsert_from_email(self.message(), self.classification(), self.candidate())
         proposal.status = "sent"

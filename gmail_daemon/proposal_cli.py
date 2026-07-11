@@ -12,6 +12,7 @@ from .actions import build_task_candidate
 from .classifier import build_classifier
 from .gmail import get_message, list_message_ids
 from .proposals import ProposalStore
+from .response_generator import ResponseGenerator
 
 
 def main() -> None:
@@ -47,6 +48,11 @@ def main() -> None:
             model_path=config.classifier_model_path,
             threshold=config.classifier_threshold,
         )
+        response_generator = ResponseGenerator(
+            enabled=config.response_generator_enabled,
+            model=config.response_generator_model,
+            base_url=config.response_generator_base_url,
+        )
         created = []
         for message_id in list_message_ids(gmail_service, config.gmail_query, args.limit):
             message = get_message(gmail_service, message_id)
@@ -54,7 +60,8 @@ def main() -> None:
             candidate = build_task_candidate(message, classification)
             if candidate is None:
                 continue
-            proposal = store.upsert_from_email(message, classification, candidate)
+            proposed_reply = response_generator.generate(message, classification, candidate)
+            proposal = store.upsert_from_email(message, classification, candidate, proposed_reply)
             created.append(proposal.__dict__)
 
         print(json.dumps(created))
