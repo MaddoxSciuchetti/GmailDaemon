@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import uuid
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterable, Iterator
 
 from .actions import TaskCandidate
 from .classifier import EmailClassification
 from .gmail import EmailMessage
 
 
-PROPOSALS_FILE = Path("email_proposals.json")
+DB_FILE = Path("gmail_daemon.db")
+LEGACY_PROPOSALS_FILE = Path("email_proposals.json")
 
 
 def _now() -> str:
@@ -38,21 +42,46 @@ class EmailProposal:
 
 
 class ProposalStore:
-    def __init__(self, path: Path = PROPOSALS_FILE) -> None:
+    def __init__(
+        self,
+        path: Path = DB_FILE,
+        legacy_path: Path = LEGACY_PROPOSALS_FILE,
+    ) -> None:
         self.path = path
+        self.legacy_path = legacy_path
+        self._init_db()
+        self._migrate_legacy_json()
 
     def list(self) -> list[EmailProposal]:
-        if not self.path.exists():
-            return []
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM proposals
+                ORDER BY created_at DESC
+                """
+            ).fetchall()
 
-        data = json.loads(self.path.read_text(encoding="utf-8"))
-        return [EmailProposal(**item) for item in data.get("proposals", [])]
+        return [_row_to_proposal(row) for row in rows]
+
+    def list_sent_by_thread(self, thread_id: str) -> list[EmailProposal]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM proposals
+                WHERE thread_id = ? AND status = 'sent'
+                ORDER BY updated_at DESC
+                """,
+                (thread_id,),
+            ).fetchall()
+
+        return [_row_to_proposal(row) for row in rows]
 
     def save_all(self, proposals: list[EmailProposal]) -> None:
-        self.path.write_text(
-            json.dumps({"proposals": [asdict(item) for item in proposals]}, indent=2),
-            encoding="utf-8",
-        )
+        with self._connect() as connection:
+            connection.execute("DELETE FROM proposals")
+            self._insert_many(connection, proposals)
 
     def upsert_from_email(
         self,
@@ -60,8 +89,7 @@ class ProposalStore:
         classification: EmailClassification,
         candidate: TaskCandidate,
     ) -> EmailProposal:
-        proposals = self.list()
-        existing = next((item for item in proposals if item.message_id == message.id), None)
+        existing = self.get_by_message_id(message.id)
         if existing:
             return existing
 
@@ -76,25 +104,194 @@ class ProposalStore:
             proposed_reply=_default_reply(candidate),
             labels=classification.labels,
         )
-        proposals.append(proposal)
-        self.save_all(proposals)
+
+        with self._connect() as connection:
+            self._insert_many(connection, [proposal])
+
         return proposal
 
     def update(self, proposal: EmailProposal) -> None:
-        proposals = self.list()
-        for index, item in enumerate(proposals):
-            if item.id == proposal.id:
-                proposal.updated_at = _now()
-                proposals[index] = proposal
-                self.save_all(proposals)
-                return
-        raise KeyError(f"Proposal not found: {proposal.id}")
+        proposal.updated_at = _now()
+        with self._connect() as connection:
+            result = connection.execute(
+                """
+                UPDATE proposals
+                SET
+                    message_id = ?,
+                    thread_id = ?,
+                    sender = ?,
+                    subject = ?,
+                    reason = ?,
+                    task_title = ?,
+                    proposed_reply = ?,
+                    labels_json = ?,
+                    status = ?,
+                    created_at = ?,
+                    updated_at = ?,
+                    replacement_text = ?,
+                    sent_message_id = ?,
+                    calendar_event_id = ?
+                WHERE id = ?
+                """,
+                _proposal_update_values(proposal),
+            )
+
+        if result.rowcount == 0:
+            raise KeyError(f"Proposal not found: {proposal.id}")
 
     def get(self, proposal_id: str) -> EmailProposal:
-        for proposal in self.list():
-            if proposal.id == proposal_id:
-                return proposal
-        raise KeyError(f"Proposal not found: {proposal_id}")
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM proposals WHERE id = ?",
+                (proposal_id,),
+            ).fetchone()
+
+        if row is None:
+            raise KeyError(f"Proposal not found: {proposal_id}")
+        return _row_to_proposal(row)
+
+    def get_by_message_id(self, message_id: str) -> EmailProposal | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM proposals WHERE message_id = ?",
+                (message_id,),
+            ).fetchone()
+
+        if row is None:
+            return None
+        return _row_to_proposal(row)
+
+    def _init_db(self) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS proposals (
+                    id TEXT PRIMARY KEY,
+                    message_id TEXT NOT NULL UNIQUE,
+                    thread_id TEXT NOT NULL,
+                    sender TEXT NOT NULL,
+                    subject TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    task_title TEXT NOT NULL,
+                    proposed_reply TEXT NOT NULL,
+                    labels_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    replacement_text TEXT,
+                    sent_message_id TEXT,
+                    calendar_event_id TEXT
+                )
+                """
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_proposals_thread_status ON proposals(thread_id, status)"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_proposals_status_created ON proposals(status, created_at)"
+            )
+
+    def _migrate_legacy_json(self) -> None:
+        if not self.legacy_path.exists():
+            return
+
+        with self._connect() as connection:
+            count = connection.execute("SELECT COUNT(*) FROM proposals").fetchone()[0]
+            if count:
+                return
+
+        data = json.loads(self.legacy_path.read_text(encoding="utf-8"))
+        proposals = [EmailProposal(**item) for item in data.get("proposals", [])]
+        if proposals:
+            with self._connect() as connection:
+                self._insert_many(connection, proposals)
+
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        connection = sqlite3.connect(self.path, timeout=10)
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA busy_timeout=5000")
+            yield connection
+            connection.commit()
+        finally:
+            connection.close()
+
+    def _insert_many(
+        self,
+        connection: sqlite3.Connection,
+        proposals: Iterable[EmailProposal],
+    ) -> None:
+        connection.executemany(
+            """
+            INSERT OR IGNORE INTO proposals (
+                id,
+                message_id,
+                thread_id,
+                sender,
+                subject,
+                reason,
+                task_title,
+                proposed_reply,
+                labels_json,
+                status,
+                created_at,
+                updated_at,
+                replacement_text,
+                sent_message_id,
+                calendar_event_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [_proposal_insert_values(proposal) for proposal in proposals],
+        )
+
+
+def _row_to_proposal(row: sqlite3.Row) -> EmailProposal:
+    return EmailProposal(
+        id=row["id"],
+        message_id=row["message_id"],
+        thread_id=row["thread_id"],
+        sender=row["sender"],
+        subject=row["subject"],
+        reason=row["reason"],
+        task_title=row["task_title"],
+        proposed_reply=row["proposed_reply"],
+        labels=json.loads(row["labels_json"]),
+        status=row["status"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        replacement_text=row["replacement_text"],
+        sent_message_id=row["sent_message_id"],
+        calendar_event_id=row["calendar_event_id"],
+    )
+
+
+def _proposal_insert_values(proposal: EmailProposal) -> tuple:
+    data = asdict(proposal)
+    return (
+        data["id"],
+        data["message_id"],
+        data["thread_id"],
+        data["sender"],
+        data["subject"],
+        data["reason"],
+        data["task_title"],
+        data["proposed_reply"],
+        json.dumps(data["labels"]),
+        data["status"],
+        data["created_at"],
+        data["updated_at"],
+        data["replacement_text"],
+        data["sent_message_id"],
+        data["calendar_event_id"],
+    )
+
+
+def _proposal_update_values(proposal: EmailProposal) -> tuple:
+    insert_values = _proposal_insert_values(proposal)
+    return insert_values[1:] + (proposal.id,)
 
 
 def _default_reply(candidate: TaskCandidate) -> str:

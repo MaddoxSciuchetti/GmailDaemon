@@ -158,11 +158,7 @@ def _maybe_create_calendar_event(
     if message.thread_id in state.created_calendar_thread_ids:
         return
 
-    sent_proposals = [
-        proposal
-        for proposal in proposal_store.list()
-        if proposal.thread_id == message.thread_id and proposal.status == "sent"
-    ]
+    sent_proposals = proposal_store.list_sent_by_thread(message.thread_id)
     if not sent_proposals:
         return
 

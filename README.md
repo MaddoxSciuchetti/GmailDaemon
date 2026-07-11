@@ -80,7 +80,7 @@ https://www.googleapis.com/auth/calendar.events
 
 ## Review UI
 
-The daemon writes actionable email proposals to `email_proposals.json`. Start the local review UI with:
+The daemon writes actionable email proposals to a local SQLite database, `gmail_daemon.db`. Start the local review UI with:
 
 ```bash
 cd web

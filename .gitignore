@@ -2,6 +2,8 @@
 token.json
 .gmail_daemon_state.json
 email_proposals.json
+gmail_daemon.db
+gmail_daemon.db-*
 __pycache__/
 *.py[cod]
 .venv/
