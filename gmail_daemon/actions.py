@@ -22,6 +22,14 @@ _MEETING_CHANGE_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+_RESCHEDULE_REQUEST_RE = re.compile(
+    r"\b("
+    r"send me (some )?dates|send (over )?(some )?dates|"
+    r"what (time|date) works|where it would work best|"
+    r"availability|available times|new time|another time"
+    r")\b",
+    re.IGNORECASE,
+)
 _MARKETING_CTA_RE = re.compile(
     r"\b("
     r"book a demo|schedule a demo|join us|register now|sign up|"
@@ -53,6 +61,21 @@ _OPERATIONAL_EVENT_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+_NON_ACTION_EVENT_RE = re.compile(
+    r"\b("
+    r"is starting|starting in|starting tomorrow|thanks for joining|"
+    r"how did you like|view event|my ticket|featured event|"
+    r"new message in|pending approval|host needs to approve"
+    r")\b",
+    re.IGNORECASE,
+)
+_ACCOUNT_MARKETING_RE = re.compile(
+    r"\b("
+    r"rabatte|discounts|deal|deals|offer|offers|free week|trial spots|"
+    r"konto l[aä]uft bald ab"
+    r")\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -71,6 +94,12 @@ def build_task_candidate(
     operational_platform_action = _is_operational_platform_action(message, text)
 
     if "spam" in labels:
+        return None
+
+    if _is_non_action_platform_update(message, text):
+        return None
+
+    if _ACCOUNT_MARKETING_RE.search(text):
         return None
 
     if ("newsletter" in labels or "sales" in labels) and not operational_platform_action:
@@ -99,6 +128,15 @@ def _is_operational_platform_action(message: EmailMessage, text: str) -> bool:
     return bool(_OPERATIONAL_PLATFORM_RE.search(platform_context) and _OPERATIONAL_EVENT_RE.search(text))
 
 
+def _is_non_action_platform_update(message: EmailMessage, text: str) -> bool:
+    platform_context = f"{message.sender}\n{text}"
+    if not _OPERATIONAL_PLATFORM_RE.search(platform_context):
+        return False
+    if _MEETING_CHANGE_RE.search(text.lower()) or _RESCHEDULE_REQUEST_RE.search(text.lower()):
+        return False
+    return bool(_NON_ACTION_EVENT_RE.search(text))
+
+
 def _is_marketing_noise(message: EmailMessage, text: str, labels: set[str]) -> bool:
     sender = message.sender.lower()
     lowered = text.lower()
@@ -125,6 +163,9 @@ def _is_marketing_noise(message: EmailMessage, text: str, labels: set[str]) -> b
 def _action_reason(text: str, labels: set[str]) -> str | None:
     lowered = text.lower()
 
+    if _MEETING_CHANGE_RE.search(lowered) and _RESCHEDULE_REQUEST_RE.search(lowered):
+        return "Reschedule required"
+
     if "meeting" in labels and _MEETING_CHANGE_RE.search(lowered):
         return "Meeting changed or cancelled"
 
@@ -134,11 +175,11 @@ def _action_reason(text: str, labels: set[str]) -> str | None:
     if "support" in labels:
         return "Support issue needs review"
 
-    if "needs reply" in labels and (_QUESTION_RE.search(text) or _REQUEST_RE.search(text)):
-        return "Reply or action requested"
-
     if _MEETING_CHANGE_RE.search(lowered):
         return "Meeting changed or cancelled"
+
+    if "needs reply" in labels and (_QUESTION_RE.search(text) or _REQUEST_RE.search(text)):
+        return "Reply or action requested"
 
     if _QUESTION_RE.search(text) or _REQUEST_RE.search(text):
         return "Reply or action requested"

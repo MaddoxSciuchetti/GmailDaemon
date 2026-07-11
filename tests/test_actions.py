@@ -38,6 +38,18 @@ class ActionTests(unittest.TestCase):
         self.assertIsNotNone(candidate)
         self.assertEqual("Meeting changed or cancelled", candidate.reason)
 
+    def test_reschedule_request_gets_specific_reason(self) -> None:
+        candidate = build_task_candidate(
+            self.message(
+                "test",
+                "i have to cancel our meet. Can you send me some dates on where it would work best for you",
+            ),
+            self.classification(["needs reply", "personal"]),
+        )
+
+        self.assertIsNotNone(candidate)
+        self.assertEqual("Reschedule required", candidate.reason)
+
     def test_creates_task_for_direct_request(self) -> None:
         candidate = build_task_candidate(
             self.message("Contract", "Can you review this today?"),
@@ -99,6 +111,42 @@ class ActionTests(unittest.TestCase):
 
         self.assertIsNotNone(candidate)
         self.assertEqual("Meeting changed or cancelled", candidate.reason)
+
+    def test_skips_luma_starting_reminder(self) -> None:
+        candidate = build_task_candidate(
+            self.message(
+                "Event is starting in 1 hour",
+                "View Event My Ticket This is a featured event in San Francisco.",
+                sender="frontiertower@calendar.luma-mail.com",
+            ),
+            self.classification(["needs reply", "meeting", "newsletter"]),
+        )
+
+        self.assertIsNone(candidate)
+
+    def test_skips_luma_pending_approval_info(self) -> None:
+        candidate = build_task_candidate(
+            self.message(
+                "Registration pending approval",
+                "The host needs to approve your registration for this Luma event.",
+                sender="usr-st83mDK2h9KM6aw@user.luma-mail.com",
+            ),
+            self.classification(["needs reply"]),
+        )
+
+        self.assertIsNone(candidate)
+
+    def test_skips_account_marketing(self) -> None:
+        candidate = build_task_candidate(
+            self.message(
+                "Hey, dein Konto läuft bald ab!",
+                "Um deine Rabatte zu behalten, musst du es nur neu verifizieren.",
+                sender="hello@info.myunidays.com",
+            ),
+            self.classification(["needs reply"]),
+        )
+
+        self.assertIsNone(candidate)
 
 
 if __name__ == "__main__":

@@ -295,6 +295,9 @@ def _proposal_update_values(proposal: EmailProposal) -> tuple:
 
 
 def _default_reply(candidate: TaskCandidate) -> str:
+    if candidate.reason == "Reschedule required":
+        return "Thanks for letting me know. Please send over a few times that work for you, and I will confirm one."
+
     if candidate.reason == "Meeting changed or cancelled":
         return "Thanks for the update. I saw the change and will adjust accordingly."
 

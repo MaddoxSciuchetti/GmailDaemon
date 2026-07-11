@@ -8,7 +8,9 @@ from googleapiclient.discovery import build
 from .auth import get_credentials
 from .config import load_config
 from .email_sender import send_reply
-from .gmail import get_message
+from .actions import build_task_candidate
+from .classifier import build_classifier
+from .gmail import get_message, list_message_ids
 from .proposals import ProposalStore
 
 
@@ -17,6 +19,9 @@ def main() -> None:
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     subcommands.add_parser("list")
+
+    backfill = subcommands.add_parser("backfill")
+    backfill.add_argument("--limit", type=int, default=20)
 
     accept = subcommands.add_parser("accept")
     accept.add_argument("proposal_id")
@@ -35,6 +40,25 @@ def main() -> None:
     config = load_config()
     credentials = get_credentials(config)
     gmail_service = build("gmail", "v1", credentials=credentials)
+
+    if args.command == "backfill":
+        classifier = build_classifier(
+            enabled=config.classifier_enabled,
+            model_path=config.classifier_model_path,
+            threshold=config.classifier_threshold,
+        )
+        created = []
+        for message_id in list_message_ids(gmail_service, config.gmail_query, args.limit):
+            message = get_message(gmail_service, message_id)
+            classification = classifier.classify(message)
+            candidate = build_task_candidate(message, classification)
+            if candidate is None:
+                continue
+            proposal = store.upsert_from_email(message, classification, candidate)
+            created.append(proposal.__dict__)
+
+        print(json.dumps(created))
+        return
 
     if args.command == "accept":
         proposal = store.get(args.proposal_id)

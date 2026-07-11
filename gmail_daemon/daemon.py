@@ -127,15 +127,15 @@ def _maybe_create_task(
     tasks_enabled: bool,
     proposal_store: ProposalStore,
 ) -> None:
-    if not tasks_enabled or tasks_service is None or message.id in state.created_task_message_ids:
-        return
-
     candidate = build_task_candidate(message, classification)
     if candidate is None:
         return
 
     proposal = proposal_store.upsert_from_email(message, classification, candidate)
     print(f"Created email proposal: {proposal.task_title}")
+
+    if not tasks_enabled or tasks_service is None or message.id in state.created_task_message_ids:
+        return
 
     try:
         task = create_task(tasks_service, tasklist_id, candidate)
