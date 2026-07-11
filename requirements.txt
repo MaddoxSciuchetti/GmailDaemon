@@ -2,3 +2,5 @@ google-api-python-client==2.176.0
 google-auth==2.40.3
 google-auth-oauthlib==1.2.2
 python-dotenv==1.1.1
+torch>=2.9,<2.14
+transformers==4.53.2

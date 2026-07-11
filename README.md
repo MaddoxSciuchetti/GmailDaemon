@@ -9,6 +9,7 @@ Small read-only daemon that watches a Gmail inbox and prints recommended next st
 - Stores the local OAuth token in `token.json`.
 - Tracks processed Gmail message IDs in `.gmail_daemon_state.json`.
 - Polls Gmail on an interval and prints simple next-step recommendations.
+- Classifies emails locally with an open-source Hugging Face model when configured.
 - Does not request or use any send-email permission.
 
 ## Setup
@@ -40,8 +41,19 @@ POLL_INTERVAL_SECONDS=60
 GMAIL_QUERY=in:inbox newer_than:7d
 STATE_FILE=.gmail_daemon_state.json
 TOKEN_FILE=token.json
+EMAIL_CLASSIFIER_ENABLED=true
+EMAIL_CLASSIFIER_MODEL_PATH=/Users/maddoxsciuchetti/.cache/huggingface/hub/models--FacebookAI--roberta-large-mnli/snapshots/2a8f12d27941090092df78e4ba6f0928eb5eac98
+EMAIL_CLASSIFIER_THRESHOLD=0.90
 ```
 
 ## Notes
 
 `CLIENT_ID` and `CLIENT_SECRET` are not enough by themselves to read email. Gmail requires the account owner to complete OAuth once, which creates the local `token.json` file.
+
+The default classifier uses a locally cached Hugging Face zero-shot model. On this machine, a usable cache was found at:
+
+```text
+/Users/maddoxsciuchetti/.cache/huggingface/hub/models--FacebookAI--roberta-large-mnli/snapshots/2a8f12d27941090092df78e4ba6f0928eb5eac98
+```
+
+The daemon sets `local_files_only=True`, so email text is not sent to Hugging Face. If the model or ML dependencies are unavailable, the daemon falls back to the rule-based recommendations.

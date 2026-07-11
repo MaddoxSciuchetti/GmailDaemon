@@ -1,5 +1,6 @@
 import unittest
 
+from gmail_daemon.classifier import EmailClassification
 from gmail_daemon.gmail import EmailMessage
 from gmail_daemon.recommendations import recommend_next_steps
 
@@ -38,6 +39,23 @@ class RecommendationTests(unittest.TestCase):
         recommendations = recommend_next_steps(self.message("FYI", "Monthly newsletter"))
 
         self.assertEqual(["Skim and archive or label if no response is needed."], recommendations)
+
+    def test_uses_classifier_labels(self) -> None:
+        classification = EmailClassification(
+            labels=["newsletter"],
+            scores={"newsletter": 0.91},
+            model_name="test-model",
+        )
+
+        recommendations = recommend_next_steps(
+            self.message("Weekly update", "Here is what changed."),
+            classification,
+        )
+
+        self.assertEqual(
+            ["Label this as a newsletter and read it later if it is not urgent."],
+            recommendations,
+        )
 
 
 if __name__ == "__main__":
