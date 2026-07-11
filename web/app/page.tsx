@@ -2,7 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Check, RefreshCw, X } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
 
 type Proposal = {
   id: string;
@@ -11,6 +21,7 @@ type Proposal = {
   reason: string;
   task_title: string;
   proposed_reply: string;
+  original_text: string;
   labels: string[];
   status: string;
   replacement_text?: string | null;
@@ -23,6 +34,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
 
   const pending = useMemo(() => proposals.filter((item) => item.status === "proposed"), [proposals]);
+  const visible = useMemo(() => proposals.filter((item) => item.status !== "ignored"), [proposals]);
 
   async function load() {
     setLoading(true);
@@ -49,73 +61,100 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-white px-6 py-8 text-black md:px-12">
+    <main className="min-h-screen bg-white px-5 py-8 text-black md:px-12">
       <section className="mx-auto flex max-w-5xl flex-col gap-8">
-        <header className="flex items-center justify-between border-b border-black pb-5">
+        <header className="flex flex-col gap-5 border-b border-black pb-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-normal">Email proposals</h1>
-            <p className="mt-1 text-sm text-neutral-600">{pending.length} pending</p>
+            <Badge variant="outline">{pending.length} pending</Badge>
+            <h1 className="mt-4 text-3xl font-semibold tracking-normal">Email proposals</h1>
+            <p className="mt-2 text-sm text-neutral-600">Review generated replies before they are sent.</p>
           </div>
           <Button variant="outline" onClick={load} disabled={loading}>
-            <RefreshCw className="mr-2 h-4 w-4" />
+            <RefreshCw className="h-4 w-4" />
             Refresh
           </Button>
         </header>
 
         <div className="grid gap-4">
-          {pending.map((proposal) => (
-            <article key={proposal.id} className="rounded-2xl border border-black p-5">
-              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                <div className="min-w-0">
-                  <p className="text-xs uppercase tracking-wide text-neutral-500">{proposal.reason}</p>
-                  <h2 className="mt-2 text-lg font-medium">{proposal.subject || "(no subject)"}</h2>
-                  <p className="mt-1 text-sm text-neutral-600">{proposal.sender}</p>
+          {visible.map((proposal) => (
+            <Card key={proposal.id}>
+              <CardHeader className="gap-4 sm:flex-row sm:items-start sm:justify-between sm:space-y-0">
+                <div className="min-w-0 space-y-2">
+                  <Badge variant="secondary">{proposal.reason}</Badge>
+                  <CardTitle className="truncate">{proposal.subject || "(no subject)"}</CardTitle>
+                  <CardDescription>{proposal.sender}</CardDescription>
                 </div>
-                <div className="flex gap-2">
-                  <Button onClick={() => act("accept", proposal)} disabled={loading}>
-                    <Check className="mr-2 h-4 w-4" />
-                    Accept
-                  </Button>
-                  <Button variant="outline" onClick={() => setSelected(proposal)} disabled={loading}>
-                    <X className="mr-2 h-4 w-4" />
-                    Decline
-                  </Button>
-                </div>
-              </div>
+                {proposal.status === "proposed" ? (
+                  <div className="flex shrink-0 gap-2">
+                    <Button onClick={() => act("accept", proposal)} disabled={loading} size="sm">
+                      <Check className="h-4 w-4" />
+                      Accept
+                    </Button>
+                    <Button variant="outline" onClick={() => setSelected(proposal)} disabled={loading} size="sm">
+                      <X className="h-4 w-4" />
+                      Decline
+                    </Button>
+                  </div>
+                ) : (
+                  <Badge variant="outline">{proposal.status}</Badge>
+                )}
+              </CardHeader>
 
-              <div className="mt-5 rounded-2xl bg-neutral-100 p-4 text-sm leading-6">
-                {proposal.proposed_reply}
-              </div>
-            </article>
+              <CardContent className="space-y-4">
+                <section>
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
+                    What they wrote
+                  </p>
+                  <div className="max-h-56 overflow-auto whitespace-pre-wrap rounded-2xl border border-black bg-white p-4 text-sm leading-6 text-neutral-900">
+                    {proposal.original_text || "No email body was available."}
+                  </div>
+                </section>
+
+                <section>
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
+                    Proposed response
+                  </p>
+                  <div className="whitespace-pre-wrap rounded-2xl border border-neutral-200 bg-neutral-50 p-4 text-sm leading-6 text-neutral-900">
+                    {proposal.proposed_reply}
+                  </div>
+                </section>
+              </CardContent>
+            </Card>
           ))}
 
-          {!pending.length && (
-            <div className="rounded-2xl border border-black p-10 text-center text-sm text-neutral-600">
-              No pending proposals.
-            </div>
+          {!visible.length && (
+            <Card>
+              <CardContent className="p-10 text-center">
+                <p className="text-sm text-neutral-600">No proposals yet.</p>
+              </CardContent>
+            </Card>
           )}
         </div>
       </section>
 
       {selected && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/20 p-6">
-          <div className="w-full max-w-xl rounded-2xl border border-black bg-white p-6">
-            <h3 className="text-lg font-medium">Write your own response</h3>
-            <textarea
-              className="mt-4 min-h-40 w-full rounded-2xl border border-black p-4 text-sm outline-none"
-              value={replacement}
-              onChange={(event) => setReplacement(event.target.value)}
-              placeholder="Enter your replacement text"
-            />
-            <div className="mt-4 flex justify-end gap-2">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-5">
+          <Card className="w-full max-w-xl">
+            <CardHeader>
+              <CardTitle>Write your own response</CardTitle>
+              <CardDescription>{selected.subject || selected.sender}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Textarea
+                value={replacement}
+                onChange={(event) => setReplacement(event.target.value)}
+                placeholder="Enter your replacement text"
+              />
+            </CardContent>
+            <CardFooter className="justify-end gap-2">
               <Button variant="outline" onClick={() => setSelected(null)}>
                 Cancel
               </Button>
               <Button onClick={() => act("decline", selected, replacement)} disabled={!replacement.trim()}>
                 Save
               </Button>
-            </div>
-          </div>
+            </CardFooter>
+          </Card>
         </div>
       )}
     </main>

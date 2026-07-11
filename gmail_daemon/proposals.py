@@ -33,6 +33,7 @@ class EmailProposal:
     task_title: str
     proposed_reply: str
     labels: list[str]
+    original_text: str = ""
     status: str = "proposed"
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
@@ -91,6 +92,9 @@ class ProposalStore:
     ) -> EmailProposal:
         existing = self.get_by_message_id(message.id)
         if existing:
+            if not existing.original_text:
+                existing.original_text = _original_text(message)
+                self.update(existing)
             return existing
 
         proposal = EmailProposal(
@@ -103,6 +107,7 @@ class ProposalStore:
             task_title=candidate.title,
             proposed_reply=_default_reply(candidate),
             labels=classification.labels,
+            original_text=_original_text(message),
         )
 
         with self._connect() as connection:
@@ -125,6 +130,7 @@ class ProposalStore:
                     task_title = ?,
                     proposed_reply = ?,
                     labels_json = ?,
+                    original_text = ?,
                     status = ?,
                     created_at = ?,
                     updated_at = ?,
@@ -175,6 +181,7 @@ class ProposalStore:
                     task_title TEXT NOT NULL,
                     proposed_reply TEXT NOT NULL,
                     labels_json TEXT NOT NULL,
+                    original_text TEXT NOT NULL DEFAULT '',
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
@@ -190,6 +197,7 @@ class ProposalStore:
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_proposals_status_created ON proposals(status, created_at)"
             )
+            _ensure_column(connection, "proposals", "original_text", "TEXT NOT NULL DEFAULT ''")
 
     def _migrate_legacy_json(self) -> None:
         if not self.legacy_path.exists():
@@ -201,7 +209,7 @@ class ProposalStore:
                 return
 
         data = json.loads(self.legacy_path.read_text(encoding="utf-8"))
-        proposals = [EmailProposal(**item) for item in data.get("proposals", [])]
+        proposals = [_proposal_from_dict(item) for item in data.get("proposals", [])]
         if proposals:
             with self._connect() as connection:
                 self._insert_many(connection, proposals)
@@ -235,6 +243,7 @@ class ProposalStore:
                 task_title,
                 proposed_reply,
                 labels_json,
+                original_text,
                 status,
                 created_at,
                 updated_at,
@@ -242,7 +251,7 @@ class ProposalStore:
                 sent_message_id,
                 calendar_event_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [_proposal_insert_values(proposal) for proposal in proposals],
         )
@@ -259,12 +268,34 @@ def _row_to_proposal(row: sqlite3.Row) -> EmailProposal:
         task_title=row["task_title"],
         proposed_reply=row["proposed_reply"],
         labels=json.loads(row["labels_json"]),
+        original_text=row["original_text"],
         status=row["status"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         replacement_text=row["replacement_text"],
         sent_message_id=row["sent_message_id"],
         calendar_event_id=row["calendar_event_id"],
+    )
+
+
+def _proposal_from_dict(data: dict) -> EmailProposal:
+    return EmailProposal(
+        id=data["id"],
+        message_id=data["message_id"],
+        thread_id=data["thread_id"],
+        sender=data["sender"],
+        subject=data["subject"],
+        reason=data["reason"],
+        task_title=data["task_title"],
+        proposed_reply=data["proposed_reply"],
+        labels=data["labels"],
+        original_text=data.get("original_text", ""),
+        status=data.get("status", "proposed"),
+        created_at=data.get("created_at", _now()),
+        updated_at=data.get("updated_at", _now()),
+        replacement_text=data.get("replacement_text"),
+        sent_message_id=data.get("sent_message_id"),
+        calendar_event_id=data.get("calendar_event_id"),
     )
 
 
@@ -280,6 +311,7 @@ def _proposal_insert_values(proposal: EmailProposal) -> tuple:
         data["task_title"],
         data["proposed_reply"],
         json.dumps(data["labels"]),
+        data["original_text"],
         data["status"],
         data["created_at"],
         data["updated_at"],
@@ -292,6 +324,25 @@ def _proposal_insert_values(proposal: EmailProposal) -> tuple:
 def _proposal_update_values(proposal: EmailProposal) -> tuple:
     insert_values = _proposal_insert_values(proposal)
     return insert_values[1:] + (proposal.id,)
+
+
+def _ensure_column(
+    connection: sqlite3.Connection,
+    table: str,
+    column: str,
+    definition: str,
+) -> None:
+    columns = {
+        row["name"]
+        for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+    }
+    if column not in columns:
+        connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def _original_text(message: EmailMessage) -> str:
+    text = message.body.strip() or message.snippet.strip()
+    return text[:8000]
 
 
 def _default_reply(candidate: TaskCandidate) -> str:

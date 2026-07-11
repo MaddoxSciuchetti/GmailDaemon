@@ -51,6 +51,7 @@ class ProposalStoreTests(unittest.TestCase):
 
         self.assertEqual(first.id, second.id)
         self.assertEqual(1, len(self.store.list()))
+        self.assertEqual("Can you review this today?", second.original_text)
 
     def test_update_persists_status(self) -> None:
         proposal = self.store.upsert_from_email(self.message(), self.classification(), self.candidate())
@@ -88,12 +89,36 @@ class ProposalStoreTests(unittest.TestCase):
             task_title="Reply",
             proposed_reply="Thanks.",
             labels=["needs reply"],
+            original_text="Original email text",
         )
         self.legacy_path.write_text(json.dumps({"proposals": [legacy.__dict__]}), encoding="utf-8")
 
         migrated = ProposalStore(path=self.db_path, legacy_path=self.legacy_path)
 
-        self.assertEqual("legacy-1", migrated.get("legacy-1").id)
+        proposal = migrated.get("legacy-1")
+        self.assertEqual("legacy-1", proposal.id)
+        self.assertEqual("Original email text", proposal.original_text)
+
+    def test_migrates_old_legacy_json_without_original_text(self) -> None:
+        legacy = {
+            "id": "legacy-2",
+            "message_id": "legacy-message-2",
+            "thread_id": "legacy-thread-2",
+            "sender": "sender@example.com",
+            "subject": "Legacy",
+            "reason": "Reply or action requested",
+            "task_title": "Reply",
+            "proposed_reply": "Thanks.",
+            "labels": ["needs reply"],
+        }
+        self.legacy_path.write_text(json.dumps({"proposals": [legacy]}), encoding="utf-8")
+        other_db = self.db_path.with_name("old-legacy.db")
+
+        migrated = ProposalStore(path=other_db, legacy_path=self.legacy_path)
+
+        proposal = migrated.get("legacy-2")
+        self.assertEqual("legacy-2", proposal.id)
+        self.assertEqual("", proposal.original_text)
 
 
 if __name__ == "__main__":
